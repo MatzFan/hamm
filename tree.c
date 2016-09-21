@@ -524,7 +524,6 @@ int main(int argc, char *argv[])
     for (k = 5; k < (unsigned) argc; ++k) {
         total = 0;
         totalcmp = 0;
-        ckref = clock();
         dist = xatoul(argv[k]);
         if (dist >= MAX_DISTANCE || dist <= 0) {
             fprintf(stderr, "Distance should be in the range 1..%d\n",
@@ -533,6 +532,8 @@ int main(int argc, char *argv[])
         }
         putchar('\n');
         printf("Distance: %lu\n", dist);
+
+        ckref = clock();
         for (i = 0; i < nquery; ++i) {
             ref = irand();
             q.n = 0;
@@ -547,6 +548,7 @@ int main(int argc, char *argv[])
         }
         t = clock();
         tm = t - ckref;
+
         qc = (double) CLOCKS_PER_SEC * (double) nquery;
         printf("Rate: %f query/sec\n", qc / tm);
         printf("Time: %f msec/query\n", 1000.0 * tm / qc);

@@ -212,6 +212,54 @@ query_linear(struct buf *restrict b, struct linear *restrict root,
     return root->count;
 }
 
+/* Bitset search ==================== */
+
+struct bitset {
+    uint32_t *bits;
+};
+
+static struct bitset *
+mktree_bitset(const bkey_t *restrict keys, size_t n, size_t max_bitset)
+{
+    struct bitset* node;
+    (void)max_bitset;
+    node = xmalloc(sizeof(*node));
+    size_t bn = 1 << (32 - 5);
+    node->bits = xmalloc(sizeof(uint32_t) * bn);
+    num_nodes += 1;
+    tree_size += (1 << (32 - 3)) + sizeof(*node);
+    for (size_t i = 0; i < bn; i++)
+        node->bits[i] = 0;
+    for (size_t i = 0; i < n; i++) {
+        bkey_t key = keys[i];
+        node->bits[key >> 5] |= 1 << (key & 31);
+    }
+    return node;
+}
+
+static size_t
+search_bitset(struct buf *restrict b, uint32_t *bits,
+              bkey_t ref, unsigned maxd, bkey_t bit)
+{
+    size_t count = 1;
+    if ((bits[ref >> 5] >> (ref & 31)) & 1)
+        addkey(b, ref);
+    if (maxd == 0)
+        return 1;
+    while (bit) {
+        count += search_bitset(b, bits, ref ^ bit, maxd - 1, bit << 1);
+        bit <<= 1;
+    }
+    return count;
+}
+
+static size_t
+query_bitset(struct buf *restrict b, struct bitset *restrict root,
+             bkey_t ref, unsigned maxd)
+{
+    return search_bitset(b, root->bits, ref, maxd, 1);
+}
+
 /* BK-tree ==================== */
 
 struct bktree {
@@ -490,6 +538,10 @@ int main(int argc, char *argv[])
         puts("Type: Linear search");
         mktree = (mktree_t) mktree_linear;
         query = (query_t) query_linear;
+    } else if (!strcasecmp(type, "bitset")) {
+        puts("Type: Bitset search");
+        mktree = (mktree_t) mktree_bitset;
+        query = (query_t) query_bitset;
     } else {
         puts("Unknown type");
         return 1;

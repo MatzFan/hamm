@@ -190,9 +190,24 @@ generate_keys(unsigned long nkeys) {
     bkey_t *keys;
     unsigned long i;
 
+    // Empty bitset for all 2^32 possible keys to prevent duplicates.
+    size_t bn = 1 << (32 - 5);
+    uint32_t *bits = xmalloc(sizeof(uint32_t) * bn);
+    for (i = 0; i < bn; ++i)
+        bits[i] = 0;
+
+    // Create unique keys.
     keys = malloc(sizeof(*keys) * nkeys);
-    for (i = 0; i < nkeys; ++i)
-        keys[i] = irand();
+    for (i = 0; i < nkeys; ) {
+        bkey_t key = irand();
+        if (!((bits[key >> 5] >> (key & 31)) & 1)) {
+            keys[i++] = key;
+            bits[key >> 5] |= 1 << (key & 31);
+        }
+    }
+
+    // Don't need the bitset anymore.
+    free(bits);
 
     return keys;
 }

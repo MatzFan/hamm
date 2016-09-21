@@ -44,6 +44,10 @@
 #define DO_PRINT 0
 #endif
 
+#ifndef VERBOSE
+#define VERBOSE 1
+#endif
+
 #ifndef HAVE_POPCNT
 #define HAVE_POPCNT 0
 #endif
@@ -582,8 +586,10 @@ int main(int argc, char *argv[])
                     MAX_DISTANCE);
             return 1;
         }
-        putchar('\n');
-        printf("Distance: %lu\n", dist);
+        if (VERBOSE) {
+            putchar('\n');
+            printf("Distance: %lu\n", dist);
+        }
 
         nquery = 0;
         ckref = clock();
@@ -604,13 +610,17 @@ int main(int argc, char *argv[])
         }
 
         qc = (double) CLOCKS_PER_SEC * (double) nquery;
-        printf("Rate: %f query/sec\n", qc / tm);
-        printf("Time: %f msec/query\n", 1000.0 * tm / qc);
-        printf("Queries: %lu\n", nquery);
-        printf("Hits: %f\n", total / (double)nquery);
-        printf("Coverage: %f%%\n",
-               100.0 * (double)totalcmp / ((double)nkeys * nquery));
-        printf("Cmp/result: %f\n", (double)totalcmp / (double)total);
+        if (VERBOSE) {
+            printf("Rate: %f query/sec\n", qc / tm);
+            printf("Time: %f msec/query\n", 1000.0 * tm / qc);
+            printf("Queries: %lu\n", nquery);
+            printf("Hits: %f\n", total / (double)nquery);
+            printf("Coverage: %f%%\n",
+                   100.0 * (double)totalcmp / ((double)nkeys * nquery));
+            printf("Cmp/result: %f\n", (double)totalcmp / (double)total);
+        } else {
+            printf("%2lu %10.2f %10lu\n", dist, qc / tm, nquery);
+        }
     }
     return 0;
 }

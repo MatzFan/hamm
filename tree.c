@@ -464,7 +464,7 @@ int main(int argc, char *argv[])
     double tm, qc;
     clock_t ckref, t;
     struct buf q = { 0, 0, 0 };
-    unsigned long nkeys, nquery, dist, i, j, k;
+    unsigned long nkeys, seconds, nquery, dist, i, j, k;
     void *root;
     bkey_t ref, *keys;
     unsigned long long total, totalcmp, maxlin;
@@ -474,7 +474,7 @@ int main(int argc, char *argv[])
     query_t query;
 
     if (argc < 5) {
-        fputs("Usage: TYPE MAXLIN NKEYS NQUERY DIST...\n", stderr);
+        fputs("Usage: TYPE MAXLIN NKEYS SECONDS DIST...\n", stderr);
         return 1;
     }
     type = argv[1];
@@ -496,14 +496,14 @@ int main(int argc, char *argv[])
     }
     maxlin = xatoul(argv[2]);
     nkeys = xatoul(argv[3]);
-    nquery = xatoul(argv[4]);
+    seconds = xatoul(argv[4]);
     if (!nkeys) {
         fputs("Need at least one key\n", stderr);
         return 1;
     }
     seedrand();
     printf("Keys: %lu\n", nkeys);
-    printf("Queries: %lu\n", nquery);
+    printf("Seconds (at least): %lu\n", seconds);
     putchar('\n');
 
     puts("Generating keys...");
@@ -533,25 +533,28 @@ int main(int argc, char *argv[])
         putchar('\n');
         printf("Distance: %lu\n", dist);
 
+        nquery = 0;
         ckref = clock();
-        for (i = 0; i < nquery; ++i) {
-            ref = irand();
-            q.n = 0;
-            nc = query(&q, root, ref, dist);
-            totalcmp += nc;
-            total += q.n;
-            if (DO_PRINT) {
-                printf("Query: %s\n", keystr(ref));
-                for (j = 0; j < q.n; ++j)
-                    printf("       %s\n", keystr2(q.keys[j], ref));
+        while (nquery < 3 || (tm = clock() - ckref) / CLOCKS_PER_SEC < seconds) {
+            for (i = nquery + 1; i > 0; --i) {
+                ref = irand();
+                q.n = 0;
+                nc = query(&q, root, ref, dist);
+                totalcmp += nc;
+                total += q.n;
+                if (DO_PRINT) {
+                    printf("Query: %s\n", keystr(ref));
+                    for (j = 0; j < q.n; ++j)
+                        printf("       %s\n", keystr2(q.keys[j], ref));
+                }
+                ++nquery;
             }
         }
-        t = clock();
-        tm = t - ckref;
 
         qc = (double) CLOCKS_PER_SEC * (double) nquery;
         printf("Rate: %f query/sec\n", qc / tm);
         printf("Time: %f msec/query\n", 1000.0 * tm / qc);
+        printf("Queries: %lu\n", nquery);
         printf("Hits: %f\n", total / (double)nquery);
         printf("Coverage: %f%%\n",
                100.0 * (double)totalcmp / ((double)nkeys * nquery));

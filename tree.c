@@ -183,6 +183,20 @@ addkey(struct buf *restrict b, bkey_t k)
     b->keys[b->n++] = k;
 }
 
+static bkey_t *
+generate_keys(unsigned long nkeys) {
+    puts("Generating keys...");
+
+    bkey_t *keys;
+    unsigned long i;
+
+    keys = malloc(sizeof(*keys) * nkeys);
+    for (i = 0; i < nkeys; ++i)
+        keys[i] = irand();
+
+    return keys;
+}
+
 /* Linear search ==================== */
 
 struct linear {
@@ -562,10 +576,7 @@ int main(int argc, char *argv[])
     printf("Seconds (at least): %lu\n", seconds);
     putchar('\n');
 
-    puts("Generating keys...");
-    keys = malloc(sizeof(*keys) * nkeys);
-    for (i = 0; i < nkeys; ++i)
-        keys[i] = irand();
+    keys = generate_keys(nkeys);
 
     puts("Building tree...");
     ckref = clock();

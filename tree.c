@@ -35,7 +35,6 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <err.h>
 #include <time.h>
 #include <stdio.h>
 #include <assert.h>
@@ -81,8 +80,10 @@ xmalloc(size_t sz)
     if (!sz)
         return NULL;
     p = malloc(sz);
-    if (!p)
-        err(1, "malloc");
+    if (!p) {
+        printf("error: malloc\n");
+        exit(1);
+    }
     return p;
 }
 
@@ -92,8 +93,10 @@ xatoul(const char *p)
     char *e;
     unsigned long x;
     x = strtoul(p, &e, 0);
-    if (*e)
-        errx(1, "must be a number: '%s'", p);
+    if (*e) {
+        printf("error: must be a number: '%s'\n", p);
+        exit(1);
+    }
     return x;
 }
 
@@ -516,7 +519,7 @@ int main(int argc, char *argv[])
     printf("Time: %.3f sec\n",
            (double)(t - ckref) / CLOCKS_PER_SEC);
     printf("Nodes: %u\n", num_nodes);
-    printf("Tree size: %zu\n", tree_size);
+    printf("Tree size: %u\n", tree_size);
 
     for (k = 5; k < (unsigned) argc; ++k) {
         total = 0;

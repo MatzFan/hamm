@@ -1,3 +1,7 @@
+## Update note
+
+I (Stefan Pochmann) changed the code to include my solution and make testing more convenient, but didn't adapt the below documentation yet. Everything below is still Dietrich's. For a description of my changes as well as my statistics see [my StackOverflow answer](http://stackoverflow.com/questions/6389841/efficiently-find-binary-strings-with-low-hamming-distance-in-large-set/6390606#6390606).
+
 # Metric tree sample implementation.
 
 This was written in response to the Stack Overflow question,

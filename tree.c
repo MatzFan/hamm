@@ -247,8 +247,8 @@ search_bitset(struct buf *restrict b, uint32_t *bits,
     if (maxd == 0)
         return 1;
     while (bit) {
-        count += search_bitset(b, bits, ref ^ bit, maxd - 1, bit << 1);
-        bit <<= 1;
+        count += search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1);
+        bit >>= 1;
     }
     return count;
 }
@@ -257,7 +257,7 @@ static size_t
 query_bitset(struct buf *restrict b, struct bitset *restrict root,
              bkey_t ref, unsigned maxd)
 {
-    return search_bitset(b, root->bits, ref, maxd, 1);
+    return search_bitset(b, root->bits, ref, maxd, 1 << 31);
 }
 
 /* BK-tree ==================== */

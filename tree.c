@@ -212,39 +212,6 @@ generate_keys(unsigned long nkeys) {
     return keys;
 }
 
-/* Linear search ==================== */
-
-struct linear {
-    size_t count;
-    bkey_t *keys;
-};
-
-static struct linear *
-mktree_linear(const bkey_t *restrict keys, size_t n, size_t max_linear)
-{
-    struct linear* node;
-    (void)max_linear;
-    node = xmalloc(sizeof(*node));
-    node->count = n;
-    node->keys = xmalloc(sizeof(bkey_t) * n);
-    num_nodes += 1;
-    tree_size += sizeof(bkey_t) * n + sizeof(*node);
-    memcpy(node->keys, keys, sizeof(bkey_t) * n);
-    return node;
-}
-
-static size_t
-query_linear(struct buf *restrict b, struct linear *restrict root,
-             bkey_t ref, unsigned maxd)
-{
-    size_t i;
-    const bkey_t *restrict p = root->keys;
-    for (i = 0; i < root->count; ++i)
-        if (distance(ref, p[i]) <= maxd)
-            addkey(b, p[i]);
-    return root->count;
-}
-
 /* Bitset search ==================== */
 
 struct bitset {
@@ -293,248 +260,6 @@ query_bitset(struct buf *restrict b, struct bitset *restrict root,
     return search_bitset(b, root->bits, ref, maxd, 1 << 31);
 }
 
-/* BK-tree ==================== */
-
-struct bktree {
-    unsigned short distance;
-    unsigned short linear;
-    union {
-        struct {
-            bkey_t key;
-            struct bktree *child;
-        } tree;
-        struct {
-            unsigned count;
-            bkey_t *keys;
-        } linear;
-    } data;
-    struct bktree *sibling;
-};
-
-static struct bktree *
-mktree_bk(const bkey_t *restrict keys, size_t n, size_t max_linear)
-{
-    size_t dcnt[MAX_DISTANCE + 1], i, a, pos[MAX_DISTANCE + 1], off, len;
-    bkey_t rootkey = keys[0], *tmp;
-    struct bktree *root, *child, *prev;
-    assert(n > 0);
-
-    num_nodes += 1;
-
-    /* Build root */
-    root = xmalloc(sizeof(*root));
-    tree_size += sizeof(*root);
-    root->distance = 0;
-    root->sibling = NULL;
-    if (n <= max_linear || n <= 1) {
-        root->linear = 1;
-        tmp = xmalloc(sizeof(*tmp) * n);
-        tree_size += sizeof(*tmp) * n;
-        memcpy(tmp, keys, sizeof(*tmp) * n);
-        root->data.linear.count = n;
-        root->data.linear.keys = tmp;
-        return root;
-    }
-    root->linear = 0;
-    root->data.tree.key = rootkey;
-    root->data.tree.child = NULL;
-
-    n -= 1;
-    keys += 1;
-    if (!n)
-        return root;
-
-    /* Sort keys by distance to root */
-    tmp = xmalloc(sizeof(*tmp) * n);
-    for (i = 0; i <= MAX_DISTANCE; ++i)
-        dcnt[i] = 0;
-    for (i = 0; i < n; ++i)
-        dcnt[distance(rootkey, keys[i])]++;
-    for (i = 0, a = 0; i <= MAX_DISTANCE; ++i)
-        dcnt[i] = (a += dcnt[i]);
-    assert(a == n);
-    memcpy(pos, dcnt, sizeof(pos));
-    for (i = 0; i < n; ++i)
-        tmp[--pos[distance(rootkey, keys[i])]] = keys[i];
-
-    /* Add child nodes */
-    for (i = 1, prev = NULL; i <= MAX_DISTANCE; ++i) {
-        off = dcnt[i-1];
-        len = dcnt[i] - off;
-        if (!len)
-            continue;
-        child = mktree_bk(tmp + off, len, max_linear);
-        child->distance = i;
-        if (prev)
-            prev->sibling = child;
-        else
-            root->data.tree.child = child;
-        prev = child;
-    }
-
-    free(tmp);
-    return root;
-}
-
-
-static size_t
-query_bk(struct buf *restrict b, struct bktree *restrict root,
-         bkey_t ref, unsigned maxd)
-{
-    /* We are trying to find x that satisfy d(ref,x) <= maxd
-       By triangle inequality, we know: d(root,x) <= d(root,ref) + d(ref,x)
-       By algebra: d(root,x) - d(root,ref) <= d(ref,x)
-       By transitivity: d(root,x) - d(root,ref) <= maxd
-       By algebra: d(root,x) <= maxd + d(root,ref) */
-    if (root->linear) {
-        const bkey_t *restrict keys = root->data.linear.keys;
-        unsigned i, n = root->data.linear.count;
-        for (i = 0; i < n; ++i)
-            if (distance(ref, keys[i]) <= maxd)
-                addkey(b, keys[i]);
-        return n;
-    } else {
-        unsigned d = distance(root->data.tree.key, ref);
-        struct bktree *p = root->data.tree.child;
-        size_t nc = 1;
-        if (d <= maxd)
-            addkey(b, root->data.tree.key);
-        for (; p && p->distance + maxd < d; p = p->sibling);
-        for (; p && p->distance <= maxd + d; p = p->sibling)
-            nc += query_bk(b, p, ref, maxd);
-        return nc;
-    }
-}
-
-/* VP-tree ==================== */
-
-struct vptree {
-    unsigned short linear;
-    union {
-        struct {
-            /* Closed ball (d = threshold is included) */
-            unsigned short threshold;
-            bkey_t vantage;
-            struct vptree *near;
-            struct vptree *far;
-        } tree;
-        struct {
-            unsigned count;
-            bkey_t *keys;
-        } linear;
-    } data;
-};
-
-static struct vptree *
-mktree_vp(const bkey_t *restrict keys, size_t n, size_t max_linear)
-{
-    size_t dcnt[MAX_DISTANCE + 1], i, a;
-    bkey_t rootkey = keys[0], *tmp;
-    struct vptree *root;
-    unsigned k;
-    size_t median, nnear, nfar, inear, ifar;
-    assert(n > 0);
-
-    num_nodes += 1;
-
-    /* Build root */
-    root = xmalloc(sizeof(*root));
-    tree_size += sizeof(root);
-    if (n <= max_linear || n <= 1) {
-        root->linear = 1;
-        tmp = xmalloc(sizeof(*tmp) * n);
-        tree_size += sizeof(*tmp) * n;
-        memcpy(tmp, keys, sizeof(*tmp) * n);
-        root->data.linear.count = n;
-        root->data.linear.keys = tmp;
-        return root;
-    }
-    root->linear = 0;
-    root->data.tree.threshold = 0;
-    root->data.tree.vantage = rootkey;
-    root->data.tree.near = NULL;
-    root->data.tree.far = NULL;
-
-    n -= 1;
-    keys += 1;
-    if (!n)
-        return root;
-
-    /* Count keys inside the given ball */
-    for (i = 0; i <= MAX_DISTANCE; ++i)
-        dcnt[i] = 0;
-    for (i = 0; i < n; ++i)
-        dcnt[distance(rootkey, keys[i])]++;
-    for (i = 0, a = 0; i <= MAX_DISTANCE; ++i)
-        dcnt[i] = (a += dcnt[i]);
-    assert(a == n);
-    median = dcnt[0] + (n - dcnt[0]) / 2;
-    for (k = 1; k <= MAX_DISTANCE; ++k)
-        if (dcnt[k] > median)
-            break;
-    if (k != 1 && median - dcnt[k-1] <= dcnt[k] - median)
-        k--;
-    nnear = dcnt[k] - dcnt[0];
-    nfar = n - dcnt[k];
-    // printf("keys: %zu; near: %zu; far: %zu; k=%u\n", n, nnear, nfar, k);
-
-    /* Sort keys into near and far sets */
-    tmp = xmalloc(sizeof(*tmp) * (nnear + nfar));
-    inear = 0;
-    ifar = nnear;
-    for (i = 0; i < n; ++i) {
-        if (keys[i] == rootkey)
-            continue;
-        if (distance(rootkey, keys[i]) <= k)
-            tmp[inear++] = keys[i];
-        else
-            tmp[ifar++] = keys[i];
-    }
-    assert(inear == nnear);
-    assert(ifar == nnear + nfar);
-
-    root->data.tree.threshold = k;
-    if (nnear)
-        root->data.tree.near = mktree_vp(tmp, nnear, max_linear);
-    if (nfar)
-        root->data.tree.far = mktree_vp(tmp + nnear, nfar, max_linear);
-
-    free(tmp);
-    return root;
-}
-
-static size_t
-query_vp(struct buf *restrict b, struct vptree *restrict root,
-         bkey_t ref, unsigned maxd)
-{
-    /* We are trying to find x that satisfy d(ref,x) <= maxd
-       By triangle inequality, we know: d(root,x) <= d(root,ref) + d(ref,x)
-       By algebra: d(root,x) - d(root,ref) <= d(ref,x)
-       By transitivity: d(root,x) - d(root,ref) <= maxd
-       By algebra: d(root,x) <= maxd + d(root,ref) */
-    if (root->linear) {
-        const bkey_t *restrict keys = root->data.linear.keys;
-        unsigned i, n = root->data.linear.count;
-        for (i = 0; i < n; ++i)
-            if (distance(ref, keys[i]) <= maxd)
-                addkey(b, keys[i]);
-        return n;
-    } else {
-        unsigned d = distance(root->data.tree.vantage, ref);
-        unsigned thr = root->data.tree.threshold;
-        size_t nc = 1;
-        if (d <= maxd + thr) {
-            if (root->data.tree.near)
-                nc += query_vp(b, root->data.tree.near, ref, maxd);
-            if (d <= maxd)
-                addkey(b, root->data.tree.vantage);
-        }
-        if (d + maxd > thr && root->data.tree.far)
-            nc += query_vp(b, root->data.tree.far, ref, maxd);
-        return nc;
-    }
-}
-
 /* Main ==================== */
 
 typedef void *(*mktree_t)(bkey_t *, size_t, size_t);
@@ -550,38 +275,21 @@ int main(int argc, char *argv[])
     bkey_t ref, *keys;
     unsigned long long total, totalcmp, maxlin;
     size_t nc;
-    char *type;
     mktree_t mktree;
     query_t query;
 
-    if (argc < 5) {
+    if (argc < 4) {
         fputs("Usage: TYPE MAXLIN NKEYS SECONDS DIST...\n", stderr);
         return 1;
     }
-    type = argv[1];
-    if (!strcasecmp(type, "bk")) {
-        puts("Type: BK-tree");
-        mktree = (mktree_t) mktree_bk;
-        query = (query_t) query_bk;
-    } else if (!strcasecmp(type, "vp")) {
-        puts("Type: VP-tree");
-        mktree = (mktree_t) mktree_vp;
-        query = (query_t) query_vp;
-    } else if (!strcasecmp(type, "linear")) {
-        puts("Type: Linear search");
-        mktree = (mktree_t) mktree_linear;
-        query = (query_t) query_linear;
-    } else if (!strcasecmp(type, "bitset")) {
-        puts("Type: Bitset search");
-        mktree = (mktree_t) mktree_bitset;
-        query = (query_t) query_bitset;
-    } else {
-        puts("Unknown type");
-        return 1;
-    }
-    maxlin = xatoul(argv[2]);
-    nkeys = xatoul(argv[3]);
-    seconds = xatoul(argv[4]);
+
+    puts("Type: Bitset search");
+    mktree = (mktree_t) mktree_bitset;
+    query = (query_t) query_bitset;
+    
+    maxlin = xatoul(argv[1]);
+    nkeys = xatoul(argv[2]);
+    seconds = xatoul(argv[3]);
     if (!nkeys) {
         fputs("Need at least one key\n", stderr);
         return 1;
@@ -601,9 +309,9 @@ int main(int argc, char *argv[])
     printf("Time: %.3f sec\n",
            (double)(t - ckref) / CLOCKS_PER_SEC);
     printf("Nodes: %u\n", num_nodes);
-    printf("Tree size: %u\n", tree_size);
+    printf("Tree size: %lu\n", tree_size);
 
-    for (k = 5; k < (unsigned) argc; ++k) {
+    for (k = 4; k < (unsigned) argc; ++k) {
         total = 0;
         totalcmp = 0;
         dist = xatoul(argv[k]);

@@ -41,7 +41,7 @@
 #include <string.h>
 
 #ifndef DO_PRINT
-#define DO_PRINT 0
+#define DO_PRINT 1
 #endif
 
 #ifndef VERBOSE
@@ -52,29 +52,29 @@
 #define HAVE_POPCNT 0
 #endif
 
-static uint32_t rand_x0, rand_x1, rand_c;
-#define RAND_A 4284966893U
+// static uint32_t rand_x0, rand_x1, rand_c;
+// #define RAND_A 4284966893U
 
-void
-seedrand(void)
-{
-    time_t t;
-    time(&t);
-    rand_x0 = t;
-    fprintf(stderr, "seed: %u\n", rand_x0);
-    rand_x1 = 0x038acaf3U;
-    rand_c = 0xa2cc5886U;
-}
+// void
+// seedrand(void)
+// {
+//     time_t t;
+//     time(&t);
+//     rand_x0 = t;
+//     fprintf(stderr, "seed: %u\n", rand_x0);
+//     rand_x1 = 0x038acaf3U;
+//     rand_c = 0xa2cc5886U;
+// }
 
-uint32_t
-irand(void)
-{
-    uint64_t y = (uint64_t)rand_x0 * RAND_A + rand_c;
-    rand_x0 = rand_x1;
-    rand_x1 = y;
-    rand_c = y >> 32;
-    return y;
-}
+// uint32_t
+// irand(void)
+// {
+//     uint64_t y = (uint64_t)rand_x0 * RAND_A + rand_c;
+//     rand_x0 = rand_x1;
+//     rand_x1 = y;
+//     rand_c = y >> 32;
+//     return y;
+// }
 
 __attribute__((malloc))
 static void *
@@ -92,44 +92,15 @@ xmalloc(size_t sz)
 }
 
 unsigned long
-xatoul(const char *p)
+xatoul(const char *p) // converts argv char * to lu
 {
     char *e;
     unsigned long x;
     x = strtoul(p, &e, 0);
-    if (*e) {
-        printf("error: must be a number: '%s'\n", p);
-        exit(1);
-    }
     return x;
 }
 
 typedef uint32_t bkey_t;
-enum { MAX_DISTANCE = 32 };
-
-#if HAVE_POPCNT
-
-static inline unsigned
-distance(bkey_t x, bkey_t y)
-{
-    return __builtin_popcount(x^y);
-}
-
-#else
-
-static inline unsigned
-distance(bkey_t x, bkey_t y)
-{
-    uint32_t d = x^y;
-    d = (d & 0x55555555U) + ((d >> 1) & 0x55555555U);
-    d = (d & 0x33333333U) + ((d >> 2) & 0x33333333U);
-    d = (d + (d >> 4)) & 0x0f0f0f0fU;
-    d = d + (d >> 8);
-    d = d + (d >> 16);
-    return d & 63;
-}
-
-#endif
 
 static char keybuf[33];
 
@@ -183,9 +154,40 @@ addkey(struct buf *restrict b, bkey_t k)
     b->keys[b->n++] = k;
 }
 
-static bkey_t *
-generate_keys(unsigned long nkeys) {
-    puts("Generating keys...");
+// static bkey_t *
+// generate_keys(unsigned long nkeys) {
+//     puts("Generating keys...");
+
+//     bkey_t *keys;
+//     unsigned long i;
+
+//     // Empty bitset for all 2^32 possible keys to prevent duplicates.
+//     size_t bn = 1 << (32 - 5);
+//     uint32_t *bits = xmalloc(sizeof(uint32_t) * bn);
+//     for (i = 0; i < bn; ++i)
+//         bits[i] = 0;
+
+//     // Create unique keys.
+//     keys = malloc(sizeof(*keys) * nkeys);
+//     for (i = 0; i < nkeys; ) {
+
+//         bkey_t key = irand(); // irand() returns a uint32_t
+
+//         if (!((bits[key >> 5] >> (key & 31)) & 1)) {
+//             keys[i++] = key;
+//             bits[key >> 5] |= 1 << (key & 31);
+//         }
+//     }
+
+//     // Don't need the bitset anymore.
+//     free(bits);
+
+//     return keys;
+// }
+
+/* Read keys from file ============== */
+
+static bkey_t * read_keys (const char* file_name, unsigned long nkeys) {
 
     bkey_t *keys;
     unsigned long i;
@@ -196,19 +198,30 @@ generate_keys(unsigned long nkeys) {
     for (i = 0; i < bn; ++i)
         bits[i] = 0;
 
-    // Create unique keys.
+    // printf("%lu\n", sizeof(*keys));
+    // printf("%lu\n", nkeys);
     keys = malloc(sizeof(*keys) * nkeys);
-    for (i = 0; i < nkeys; ) {
-        bkey_t key = irand();
-        if (!((bits[key >> 5] >> (key & 31)) & 1)) {
-            keys[i++] = key;
-            bits[key >> 5] |= 1 << (key & 31);
-        }
+
+    // printf("%s\n", file_name);
+
+    unsigned long j = 0;
+    FILE* file = fopen (file_name, "r");
+    if (fscanf (file, "%lu", &j) == 0)
+        EXIT_FAILURE;
+    while (!feof (file)) {  
+        bkey_t key = j;
+        printf("%u\n", key);
+
+
+        // if (!((bits[key >> 5] >> (key & 31)) & 1)) {
+        //     keys[j++] = key;
+        //     bits[key >> 5] |= 1 << (key & 31);
+        // }
+
+        if (fscanf (file, "%lu", &j) == 0)
+            EXIT_FAILURE;
     }
-
-    // Don't need the bitset anymore.
-    free(bits);
-
+    fclose (file);
     return keys;
 }
 
@@ -219,10 +232,9 @@ struct bitset {
 };
 
 static struct bitset *
-mktree_bitset(const bkey_t *restrict keys, size_t n, size_t max_bitset)
+mktree_bitset(const bkey_t *restrict keys, size_t n)
 {
     struct bitset* node;
-    (void)max_bitset;
     node = xmalloc(sizeof(*node));
     size_t bn = 1 << (32 - 5);
     node->bits = xmalloc(sizeof(uint32_t) * bn);
@@ -247,7 +259,7 @@ search_bitset(struct buf *restrict b, uint32_t *bits,
     if (maxd == 0)
         return 1;
     while (bit) {
-        count += search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1);
+        count += search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1); // recurse
         bit >>= 1;
     }
     return count;
@@ -262,48 +274,48 @@ query_bitset(struct buf *restrict b, struct bitset *restrict root,
 
 /* Main ==================== */
 
-typedef void *(*mktree_t)(bkey_t *, size_t, size_t);
+typedef void *(*mktree_t)(bkey_t *, size_t);
 typedef size_t (*query_t)(struct buf *, void *, bkey_t, unsigned);
 
 int main(int argc, char *argv[])
 {
-    double tm, qc;
+    // double tm, qc;
+    // double tm;
     clock_t ckref, t;
     struct buf q = { 0, 0, 0 };
-    unsigned long nkeys, seconds, nquery, dist, i, j, k;
+    unsigned long nkeys, dist, j; // seconds was here
     void *root;
     bkey_t ref, *keys;
-    unsigned long long total, totalcmp, maxlin;
+    unsigned long long total, totalcmp;
     size_t nc;
     mktree_t mktree;
+
     query_t query;
 
-    if (argc < 4) {
-        fputs("Usage: TYPE MAXLIN NKEYS SECONDS DIST...\n", stderr);
+    if (argc != 2) {
+        fputs("Usage: DIST\n", stderr);
         return 1;
     }
 
-    puts("Type: Bitset search");
     mktree = (mktree_t) mktree_bitset;
     query = (query_t) query_bitset;
     
-    maxlin = xatoul(argv[1]);
-    nkeys = xatoul(argv[2]);
-    seconds = xatoul(argv[3]);
-    if (!nkeys) {
-        fputs("Need at least one key\n", stderr);
-        return 1;
-    }
-    seedrand();
+    nkeys = xatoul(argv[1]);
+    // seconds = xatoul(argv[3]);
+    
+    // seedrand();
     printf("Keys: %lu\n", nkeys);
-    printf("Seconds (at least): %lu\n", seconds);
+    // printf("Seconds (at least): %lu\n", seconds);
     putchar('\n');
 
-    keys = generate_keys(nkeys);
+    // keys = generate_keys(nkeys);
 
-    puts("Building tree...");
+    // keys = NULL;
+
+    keys = read_keys("/home/me/dev/metric-tree-demo/fingerprints", 10); // 2nd arg is nkeys
+    
     ckref = clock();
-    root = mktree(keys, nkeys, maxlin);
+    root = mktree(keys, nkeys); // root is the tree structure
     free(keys);
     t = clock();
     printf("Time: %.3f sec\n",
@@ -311,50 +323,50 @@ int main(int argc, char *argv[])
     printf("Nodes: %u\n", num_nodes);
     printf("Tree size: %lu\n", tree_size);
 
-    for (k = 4; k < (unsigned) argc; ++k) {
-        total = 0;
-        totalcmp = 0;
-        dist = xatoul(argv[k]);
-        if (dist >= MAX_DISTANCE || dist <= 0) {
-            fprintf(stderr, "Distance should be in the range 1..%d\n",
-                    MAX_DISTANCE);
-            return 1;
-        }
-        if (VERBOSE) {
-            putchar('\n');
-            printf("Distance: %lu\n", dist);
-        }
+    total = 0;
+    totalcmp = 0;
+    dist = 2; // hamm dist
+   
+    // if (VERBOSE) {
+    //     putchar('\n');
+    //     printf("Distance: %lu\n", dist);
+    // }
 
-        nquery = 0;
-        ckref = clock();
-        while (nquery < 3 || (tm = clock() - ckref) / CLOCKS_PER_SEC < seconds) {
-            for (i = nquery + 1; i > 0; --i) {
-                ref = irand();
-                q.n = 0;
-                nc = query(&q, root, ref, dist);
-                totalcmp += nc;
-                total += q.n;
-                if (DO_PRINT) {
-                    printf("Query: %s\n", keystr(ref));
-                    for (j = 0; j < q.n; ++j)
-                        printf("       %s\n", keystr2(q.keys[j], ref));
-                }
-                ++nquery;
-            }
-        }
+    // nquery = 0;
+    ckref = clock();
+    // while (nquery < 3 || (tm = clock() - ckref) / CLOCKS_PER_SEC < seconds) {
+    //     for (i = nquery + 1; i > 0; --i) {
+            // ref = irand();
 
-        qc = (double) CLOCKS_PER_SEC * (double) nquery;
-        if (VERBOSE) {
-            printf("Rate: %f query/sec\n", qc / tm);
-            printf("Time: %f msec/query\n", 1000.0 * tm / qc);
-            printf("Queries: %lu\n", nquery);
-            printf("Hits: %f\n", total / (double)nquery);
-            printf("Coverage: %f%%\n",
-                   100.0 * (double)totalcmp / ((double)nkeys * nquery));
-            printf("Cmp/result: %f\n", (double)totalcmp / (double)total);
-        } else {
-            printf("%2lu %10.2f %10lu\n", dist, qc / tm, nquery);
-        }
+    ref = 2598365869; // number to be compared
+
+    q.n = 0;
+    nc = query(&q, root, ref, dist);
+
+    printf("%lu\n", nc); // 529 ?????
+
+    totalcmp += nc;
+    total += q.n;
+    if (DO_PRINT) {
+        printf("Query: %s\n", keystr(ref));
+        for (j = 0; j < q.n; ++j)
+            printf("       %s\n", keystr2(q.keys[j], ref));
     }
+    //         ++nquery;
+    //     }
+    // }
+
+    // qc = (double) CLOCKS_PER_SEC * (double) nquery;
+    // if (VERBOSE) {
+    //     printf("Rate: %f query/sec\n", qc / tm);
+    //     printf("Time: %f msec/query\n", 1000.0 * tm / qc);
+    //     printf("Queries: %lu\n", nquery);
+    //     printf("Hits: %f\n", total / (double)nquery);
+    //     printf("Coverage: %f%%\n",
+    //            100.0 * (double)totalcmp / ((double)nkeys * nquery));
+    //     printf("Cmp/result: %f\n", (double)totalcmp / (double)total);
+    // } else {
+    //     printf("%2lu %10.2f %10lu\n", dist, qc / tm, nquery);
+    // }
     return 0;
 }

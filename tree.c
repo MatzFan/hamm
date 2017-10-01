@@ -48,33 +48,9 @@
 #define VERBOSE 1
 #endif
 
-#ifndef HAVE_POPCNT
-#define HAVE_POPCNT 0
+#ifndef HAMMING_DISTANCE
+#define HAMMING_DISTANCE 2
 #endif
-
-// static uint32_t rand_x0, rand_x1, rand_c;
-// #define RAND_A 4284966893U
-
-// void
-// seedrand(void)
-// {
-//     time_t t;
-//     time(&t);
-//     rand_x0 = t;
-//     fprintf(stderr, "seed: %u\n", rand_x0);
-//     rand_x1 = 0x038acaf3U;
-//     rand_c = 0xa2cc5886U;
-// }
-
-// uint32_t
-// irand(void)
-// {
-//     uint64_t y = (uint64_t)rand_x0 * RAND_A + rand_c;
-//     rand_x0 = rand_x1;
-//     rand_x1 = y;
-//     rand_c = y >> 32;
-//     return y;
-// }
 
 __attribute__((malloc))
 static void *
@@ -102,25 +78,23 @@ xatoul(const char *p) // converts argv char * to lu
 
 typedef uint32_t bkey_t;
 
-static char keybuf[33];
+static char keybuf[33]; // one more than bitset size
 
-static const char *
-keystr(bkey_t k)
+static const char *keystr(bkey_t k) // used to print binary keystring for a key
 {
     unsigned i;
-    for (i = 0; i < 32; ++i) {
-        keybuf[31 - i] = '0' + (k & 1);
+    for (i = 0; i < 32; ++i) { // iterate all bits
+        keybuf[31 - i] = '0' + (k & 1); // add 0 or 1 to buffer Little Endian
         k >>= 1;
     }
     keybuf[32] = '\0';
     return keybuf;
 }
 
-static const char *
-keystr2(bkey_t k, bkey_t ref)
+static const char *keystr2(bkey_t k, bkey_t ref)
 {
     unsigned i;
-    bkey_t d = ref ^ k;
+    bkey_t d = ref ^ k; // xor - why????
     for (i = 0; i < 32; ++i) {
         keybuf[31 - i] = (d & 1) ? ('0' + (k & 1)) : '.';
         d >>= 1;
@@ -130,8 +104,8 @@ keystr2(bkey_t k, bkey_t ref)
     return keybuf;
 }
 
-static unsigned num_nodes = 0;
-static size_t tree_size = 0;
+static unsigned num_nodes = 0; // declared in global scope for printing in main
+static size_t tree_size = 0; // ditto
 
 struct buf {
     bkey_t *keys;
@@ -141,6 +115,7 @@ struct buf {
 static void
 addkey(struct buf *restrict b, bkey_t k)
 {
+    printf("Adding key\n");
     size_t na;
     bkey_t *np;
     if (b->n >= b->a) {
@@ -154,95 +129,89 @@ addkey(struct buf *restrict b, bkey_t k)
     b->keys[b->n++] = k;
 }
 
-// static bkey_t *
-// generate_keys(unsigned long nkeys) {
-//     puts("Generating keys...");
+/* Read keys from file ============== */
+
+// static bkey_t * read_keys (const char* file_name, unsigned long nkeys) {
 
 //     bkey_t *keys;
-//     unsigned long i;
+//     // unsigned long i;
 
 //     // Empty bitset for all 2^32 possible keys to prevent duplicates.
 //     size_t bn = 1 << (32 - 5);
 //     uint32_t *bits = xmalloc(sizeof(uint32_t) * bn);
-//     for (i = 0; i < bn; ++i)
-//         bits[i] = 0;
+//     // for (i = 0; i < bn; ++i)
+//     //     bits[i] = 0;
 
-//     // Create unique keys.
 //     keys = malloc(sizeof(*keys) * nkeys);
-//     for (i = 0; i < nkeys; ) {
 
-//         bkey_t key = irand(); // irand() returns a uint32_t
+//     FILE* file = fopen (file_name, "r");
+//     // if (fscanf (file, "%lu", &j) == 0)
+//     //     EXIT_FAILURE;
+//     unsigned long j = 0;
+//     char line[34]; // 32 digits = \0 + \nS
+//     char *ptr;
+//     while (fgets(line, sizeof(line), file) != NULL) { /* read a line */
+//         line[strcspn(line, "\n")] = 0; // strips newline
+//         bkey_t key = strtoul(line, &ptr, 2); // read leading num as base 2
 
 //         if (!((bits[key >> 5] >> (key & 31)) & 1)) {
-//             keys[i++] = key;
+//             keys[j++] = key;
 //             bits[key >> 5] |= 1 << (key & 31);
 //         }
+//         j++;
 //     }
-
-//     // Don't need the bitset anymore.
-//     free(bits);
-
+//     fclose (file);
+//     putchar('\n');
+//     printf("Keys[9]: %s\n", keystr(keys[9]));
 //     return keys;
 // }
 
-/* Read keys from file ============== */
 
-static bkey_t * read_keys (const char* file_name, unsigned long nkeys) {
-
+static bkey_t *
+generate_keys(uint32_t fps[], unsigned long nkeys) {
     bkey_t *keys;
     unsigned long i;
-
     // Empty bitset for all 2^32 possible keys to prevent duplicates.
     size_t bn = 1 << (32 - 5);
     uint32_t *bits = xmalloc(sizeof(uint32_t) * bn);
     for (i = 0; i < bn; ++i)
         bits[i] = 0;
 
-    // printf("%lu\n", sizeof(*keys));
-    // printf("%lu\n", nkeys);
+    // Create unique keys.
     keys = malloc(sizeof(*keys) * nkeys);
-
-    // printf("%s\n", file_name);
-
-    unsigned long j = 0;
-    FILE* file = fopen (file_name, "r");
-    if (fscanf (file, "%lu", &j) == 0)
-        EXIT_FAILURE;
-    while (!feof (file)) {  
-        bkey_t key = j;
-        printf("%u\n", key);
-
-
-        // if (!((bits[key >> 5] >> (key & 31)) & 1)) {
-        //     keys[j++] = key;
-        //     bits[key >> 5] |= 1 << (key & 31);
-        // }
-
-        if (fscanf (file, "%lu", &j) == 0)
-            EXIT_FAILURE;
+    for (i = 0; i < nkeys; ) {
+        bkey_t key = fps[i];
+        if (!((bits[key >> 5] >> (key & 31)) & 1)) {
+            keys[i++] = key;
+            // printf("%s\n", keystr(key));
+            bits[key >> 5] |= 1 << (key & 31);
+        }
     }
-    fclose (file);
+    putchar('\n');
+    free(bits);
+
     return keys;
 }
+
 
 /* Bitset search ==================== */
 
 struct bitset {
-    uint32_t *bits;
+    uint32_t *bits; // global scope 
 };
 
 static struct bitset *
-mktree_bitset(const bkey_t *restrict keys, size_t n)
+mktree_bitset(const bkey_t *restrict keys, size_t num_keys)
 {
-    struct bitset* node;
+    struct bitset* node; // each node is 32 bit bitset
     node = xmalloc(sizeof(*node));
-    size_t bn = 1 << (32 - 5);
+    size_t bn = 1 << (32 - 5); // 2**27 = 134217728
     node->bits = xmalloc(sizeof(uint32_t) * bn);
     num_nodes += 1;
-    tree_size += (1 << (32 - 3)) + sizeof(*node);
+    tree_size += (1 << (32 - 3)) + sizeof(*node); // 2**29 +8 => 536870920
     for (size_t i = 0; i < bn; i++)
         node->bits[i] = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < num_keys; i++) {
         bkey_t key = keys[i];
         node->bits[key >> 5] |= 1 << (key & 31);
     }
@@ -254,69 +223,65 @@ search_bitset(struct buf *restrict b, uint32_t *bits,
               bkey_t ref, unsigned maxd, bkey_t bit)
 {
     size_t count = 1;
-    if ((bits[ref >> 5] >> (ref & 31)) & 1)
-        addkey(b, ref);
-    if (maxd == 0)
+    if ((bits[ref >> 5] >> (ref & 31)) & 1) // bits is tree root
+        addkey(b, ref); // b is buffer address - to record found keys???
+    if (maxd == 0) // exit condition: no match found??
         return 1;
-    while (bit) {
-        count += search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1); // recurse
+    while (bit) { // iterate through all 31 bits; from 31 to 0
+        /* recurse, with ref with bit x set to 0 and bit incremented */
+        search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1);
         bit >>= 1;
     }
-    return count;
+    return count; // was match found ,if got to here??????
 }
 
 static size_t
 query_bitset(struct buf *restrict b, struct bitset *restrict root,
-             bkey_t ref, unsigned maxd)
+             bkey_t ref)
 {
-    return search_bitset(b, root->bits, ref, maxd, 1 << 31);
+    return search_bitset(b, root->bits, ref, HAMMING_DISTANCE, 1 << 31); // 2**31
 }
 
 /* Main ==================== */
 
 typedef void *(*mktree_t)(bkey_t *, size_t);
-typedef size_t (*query_t)(struct buf *, void *, bkey_t, unsigned);
+typedef size_t (*query_t)(struct buf *, void *, bkey_t);
 
-int main(int argc, char *argv[])
+int main() // int argc, char *argv[]
 {
+    uint32_t fps[10] = { 3926103320,
+                         4283886574,
+                         2780175709,
+                         3284479930,
+                         1923677470,
+                         1596497511,
+                         629345177,
+                         2432890560,
+                         696849934,
+                         1992245486
+                       };
     // double tm, qc;
     // double tm;
     clock_t ckref, t;
     struct buf q = { 0, 0, 0 };
-    unsigned long nkeys, dist, j; // seconds was here
+    unsigned long j; // dist, seconds was here
+    unsigned long nkeys;
     void *root;
     bkey_t ref, *keys;
-    unsigned long long total, totalcmp;
+    unsigned long long total; // totalcmp;
     size_t nc;
     mktree_t mktree;
-
     query_t query;
-
-    if (argc != 2) {
-        fputs("Usage: DIST\n", stderr);
-        return 1;
-    }
 
     mktree = (mktree_t) mktree_bitset;
     query = (query_t) query_bitset;
-    
-    nkeys = xatoul(argv[1]);
-    // seconds = xatoul(argv[3]);
-    
-    // seedrand();
-    printf("Keys: %lu\n", nkeys);
-    // printf("Seconds (at least): %lu\n", seconds);
-    putchar('\n');
 
-    // keys = generate_keys(nkeys);
+    nkeys = sizeof(fps) / sizeof(fps[0]);
+    keys = generate_keys(fps, nkeys); // **TO DO** PASS POINTER INSTEAD
 
-    // keys = NULL;
-
-    keys = read_keys("/home/me/dev/metric-tree-demo/fingerprints", 10); // 2nd arg is nkeys
-    
     ckref = clock();
-    root = mktree(keys, nkeys); // root is the tree structure
-    free(keys);
+    root = mktree(keys, nkeys); // build data structure
+    free(keys); // no longer needed
     t = clock();
     printf("Time: %.3f sec\n",
            (double)(t - ckref) / CLOCKS_PER_SEC);
@@ -324,49 +289,21 @@ int main(int argc, char *argv[])
     printf("Tree size: %lu\n", tree_size);
 
     total = 0;
-    totalcmp = 0;
-    dist = 2; // hamm dist
-   
-    // if (VERBOSE) {
-    //     putchar('\n');
-    //     printf("Distance: %lu\n", dist);
-    // }
-
-    // nquery = 0;
     ckref = clock();
-    // while (nquery < 3 || (tm = clock() - ckref) / CLOCKS_PER_SEC < seconds) {
-    //     for (i = nquery + 1; i > 0; --i) {
-            // ref = irand();
-
-    ref = 2598365869; // number to be compared
+    ref = 1992245614; // number to be compared
 
     q.n = 0;
-    nc = query(&q, root, ref, dist);
+    nc = query(&q, root, ref); // QUERY STRUCTURE
 
-    printf("%lu\n", nc); // 529 ?????
+    printf("Count: %lu\n", nc);
 
-    totalcmp += nc;
+    // totalcmp += nc;
     total += q.n;
     if (DO_PRINT) {
-        printf("Query: %s\n", keystr(ref));
+        printf("Ref is %s\n", keystr(ref));
         for (j = 0; j < q.n; ++j)
             printf("       %s\n", keystr2(q.keys[j], ref));
     }
-    //         ++nquery;
-    //     }
-    // }
-
-    // qc = (double) CLOCKS_PER_SEC * (double) nquery;
-    // if (VERBOSE) {
-    //     printf("Rate: %f query/sec\n", qc / tm);
-    //     printf("Time: %f msec/query\n", 1000.0 * tm / qc);
-    //     printf("Queries: %lu\n", nquery);
-    //     printf("Hits: %f\n", total / (double)nquery);
-    //     printf("Coverage: %f%%\n",
-    //            100.0 * (double)totalcmp / ((double)nkeys * nquery));
-    //     printf("Cmp/result: %f\n", (double)totalcmp / (double)total);
-    // } else {
-    //     printf("%2lu %10.2f %10lu\n", dist, qc / tm, nquery);
-    // }
+    
     return 0;
 }

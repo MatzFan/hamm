@@ -41,7 +41,7 @@
 #include <string.h>
 
 #ifndef DO_PRINT
-#define DO_PRINT 1
+#define DO_PRINT 0
 #endif
 
 #ifndef VERBOSE
@@ -91,31 +91,30 @@ static const char *keystr(bkey_t k) // used to print binary keystring for a key
     return keybuf;
 }
 
-static const char *keystr2(bkey_t k, bkey_t ref)
-{
-    unsigned i;
-    bkey_t d = ref ^ k; // xor - why????
-    for (i = 0; i < 32; ++i) {
-        keybuf[31 - i] = (d & 1) ? ('0' + (k & 1)) : '.';
-        d >>= 1;
-        k >>= 1;
-    }
-    keybuf[32] = '\0';
-    return keybuf;
-}
+// static const char *keystr2(bkey_t k, bkey_t ref)
+// {
+//     unsigned i;
+//     bkey_t d = ref ^ k; // xor - why????
+//     for (i = 0; i < 32; ++i) {
+//         keybuf[31 - i] = (d & 1) ? ('0' + (k & 1)) : '.';
+//         d >>= 1;
+//         k >>= 1;
+//     }
+//     keybuf[32] = '\0';
+//     return keybuf;
+// }
 
 static unsigned num_nodes = 0; // declared in global scope for printing in main
 static size_t tree_size = 0; // ditto
 
 struct buf {
-    bkey_t *keys;
+    bkey_t *keys; // pointer to an uint32_t
     size_t n, a;
 };
 
-static void
-addkey(struct buf *restrict b, bkey_t k)
+static bkey_t
+addkey(struct buf *restrict b, bkey_t k) // generic function to add a key to a tree
 {
-    printf("Adding key\n");
     size_t na;
     bkey_t *np;
     if (b->n >= b->a) {
@@ -127,6 +126,7 @@ addkey(struct buf *restrict b, bkey_t k)
         b->a = na;
     }
     b->keys[b->n++] = k;
+    return k;
 }
 
 /* Read keys from file ============== */
@@ -187,7 +187,6 @@ generate_keys(uint32_t fps[], unsigned long nkeys) {
             bits[key >> 5] |= 1 << (key & 31);
         }
     }
-    putchar('\n');
     free(bits);
 
     return keys;
@@ -218,37 +217,60 @@ mktree_bitset(const bkey_t *restrict keys, size_t num_keys)
     return node;
 }
 
-static size_t
+static bkey_t
 search_bitset(struct buf *restrict b, uint32_t *bits,
-              bkey_t ref, unsigned maxd, bkey_t bit)
+              bkey_t ref, unsigned maxd, bkey_t bit,
+              bkey_t found) // pass 0 here as initial value of found
 {
-    size_t count = 1;
-    if ((bits[ref >> 5] >> (ref & 31)) & 1) // bits is tree root
-        addkey(b, ref); // b is buffer address - to record found keys???
-    if (maxd == 0) // exit condition: no match found??
-        return 1;
+    if ((bits[ref >> 5] >> (ref & 31)) & 1) { // bits is tree root
+        found = addkey(b, ref);
+    }
+    if (maxd == 0) // error condition
+        return found;
     while (bit) { // iterate through all 31 bits; from 31 to 0
-        /* recurse, with ref with bit x set to 0 and bit incremented */
-        search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1);
+        found = search_bitset(b, bits, ref ^ bit, maxd - 1, bit >> 1, found);
         bit >>= 1;
     }
-    return count; // was match found ,if got to here??????
+    return found; // was 1. No similar key found 
 }
 
-static size_t
+static bkey_t
 query_bitset(struct buf *restrict b, struct bitset *restrict root,
              bkey_t ref)
 {
-    return search_bitset(b, root->bits, ref, HAMMING_DISTANCE, 1 << 31); // 2**31
+    return search_bitset(b, root->bits, ref, HAMMING_DISTANCE, 1 << 31, 0);
 }
+
 
 /* Main ==================== */
 
 typedef void *(*mktree_t)(bkey_t *, size_t);
 typedef size_t (*query_t)(struct buf *, void *, bkey_t);
 
-int main() // int argc, char *argv[]
+int main(int argc, char *argv[])
 {
+    // double tm, qc;
+    // double tm;
+    // clock_t ckref, t;
+    struct buf q = { 0, 0, 0 };
+    // unsigned long j; // dist, seconds was here
+    unsigned long nkeys;
+    void *root;
+    bkey_t ref, *keys;
+    unsigned long long total; // totalcmp;
+    // size_t nc;
+    mktree_t mktree;
+    query_t query;
+
+    mktree = (mktree_t) mktree_bitset;
+    query = (query_t) query_bitset;
+
+    if (argc != 2) {
+        printf("A uint32_t argument must be supplied");
+        return 1;
+    }
+    ref = xatoul(argv[1]);
+     
     uint32_t fps[10] = { 3926103320,
                          4283886574,
                          2780175709,
@@ -260,49 +282,37 @@ int main() // int argc, char *argv[]
                          696849934,
                          1992245486
                        };
-    // double tm, qc;
-    // double tm;
-    clock_t ckref, t;
-    struct buf q = { 0, 0, 0 };
-    unsigned long j; // dist, seconds was here
-    unsigned long nkeys;
-    void *root;
-    bkey_t ref, *keys;
-    unsigned long long total; // totalcmp;
-    size_t nc;
-    mktree_t mktree;
-    query_t query;
-
-    mktree = (mktree_t) mktree_bitset;
-    query = (query_t) query_bitset;
 
     nkeys = sizeof(fps) / sizeof(fps[0]);
     keys = generate_keys(fps, nkeys); // **TO DO** PASS POINTER INSTEAD
 
-    ckref = clock();
+    // ckref = clock();
     root = mktree(keys, nkeys); // build data structure
     free(keys); // no longer needed
-    t = clock();
-    printf("Time: %.3f sec\n",
-           (double)(t - ckref) / CLOCKS_PER_SEC);
-    printf("Nodes: %u\n", num_nodes);
-    printf("Tree size: %lu\n", tree_size);
+    // t = clock();
+    // printf("Time: %.3f sec\n",
+    //        (double)(t - ckref) / CLOCKS_PER_SEC);
+    // printf("Nodes: %u\n", num_nodes);
+    // printf("Tree size: %lu\n", tree_size);
 
-    total = 0;
-    ckref = clock();
-    ref = 1992245614; // number to be compared
+    // total = 0;
+    // ckref = clock();
 
     q.n = 0;
-    nc = query(&q, root, ref); // QUERY STRUCTURE
+    // nc = query(&q, root, ref); // QUERY STRUCTURE
+    bkey_t similar = query(&q, root, ref); // QUERY STRUCTURE
+    
+    if (similar != 0)
+        printf("%u", similar);
 
-    printf("Count: %lu\n", nc);
+    // printf("Count: %lu\n", nc);
 
     // totalcmp += nc;
     total += q.n;
     if (DO_PRINT) {
         printf("Ref is %s\n", keystr(ref));
-        for (j = 0; j < q.n; ++j)
-            printf("       %s\n", keystr2(q.keys[j], ref));
+        // for (j = 0; j < q.n; ++j)
+            // printf("       %s\n", keystr2(q.keys[j], ref));
     }
     
     return 0;

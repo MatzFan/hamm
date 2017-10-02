@@ -1,10 +1,10 @@
 CC = gcc
 CFLAGS = -O3 -Wall -Wextra -Werror -std=gnu99
 
-all : tree
+all : hamm
 
 clean :
-	rm -f tree
+	rm -f hamm
 
-tree : tree.o Makefile
-	$(CC) tree.o -o tree
+hamm : hamm.o Makefile
+	$(CC) hamm.o -o hamm
